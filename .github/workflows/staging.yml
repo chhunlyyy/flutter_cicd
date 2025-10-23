@@ -31,28 +31,39 @@ jobs:
           echo "🔧 Installing Shorebird CLI..."
           mkdir -p $HOME/.shorebird/bin
 
-          # Fetch the latest release download URL dynamically
+          # Fetch the latest release download URL for the correct platform
           LATEST_URL=$(curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest \
             | grep "browser_download_url" \
-            | grep "zip" \
-            | cut -d '"' -f 4 | head -n 1)
+            | grep "$(uname -s | tr '[:upper:]' '[:lower:]')" \
+            | grep "x86_64" \
+            | cut -d '"' -f 4)
+
+          # Fallback if platform-specific filter fails
+          if [ -z "$LATEST_URL" ]; then
+            LATEST_URL=$(curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest \
+              | grep "browser_download_url" \
+              | grep "zip" \
+              | cut -d '"' -f 4 | head -n 1)
+          fi
 
           echo "📦 Downloading from: $LATEST_URL"
 
           if [ -z "$LATEST_URL" ]; then
             echo "❌ Could not find Shorebird release URL."
+            echo "Debug info:"
+            curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest | grep "browser_download_url"
             exit 1
           fi
 
           curl -L "$LATEST_URL" -o shorebird.zip
-          unzip shorebird.zip -d $HOME/.shorebird/bin > /dev/null
-          chmod +x $HOME/.shorebird/bin/shorebird || true
+          unzip -q shorebird.zip -d $HOME/.shorebird/bin
+          chmod +x $HOME/.shorebird/bin/shorebird
 
           echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
           export PATH="$HOME/.shorebird/bin:$PATH"
 
           echo "✅ Shorebird installed successfully!"
-          shorebird --version || echo "⚠️ Could not verify Shorebird version"
+          shorebird --version
 
 
       # 5️⃣ Check version change
