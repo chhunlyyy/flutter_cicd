@@ -25,88 +25,127 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # 4️⃣ Install Shorebird manually
+      # 4️⃣ Install Shorebird CLI
       - name: Install Shorebird CLI
         run: |
           echo "🔧 Installing Shorebird CLI..."
           mkdir -p $HOME/.shorebird/bin
 
-          # Fetch the latest release download URL for the correct platform
+          # Use jq to properly parse JSON response
           LATEST_URL=$(curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest \
-            | grep "browser_download_url" \
-            | grep "$(uname -s | tr '[:upper:]' '[:lower:]')" \
-            | grep "x86_64" \
+            | grep -o '"browser_download_url":[^,]*' \
+            | grep "linux-x64.zip" \
             | cut -d '"' -f 4)
 
-          # Fallback if platform-specific filter fails
+          # Alternative method if above fails
           if [ -z "$LATEST_URL" ]; then
-            LATEST_URL=$(curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest \
-              | grep "browser_download_url" \
-              | grep "zip" \
-              | cut -d '"' -f 4 | head -n 1)
+            echo "Trying alternative download method..."
+            LATEST_URL="https://github.com/shorebirdtech/shorebird/releases/latest/download/shorebird-linux-x64.zip"
           fi
 
           echo "📦 Downloading from: $LATEST_URL"
 
           if [ -z "$LATEST_URL" ]; then
             echo "❌ Could not find Shorebird release URL."
-            echo "Debug info:"
+            echo "Available assets from latest release:"
             curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest | grep "browser_download_url"
             exit 1
           fi
 
-          curl -L "$LATEST_URL" -o shorebird.zip
+          # Download and install
+          curl -L -f "$LATEST_URL" -o shorebird.zip || {
+            echo "❌ Failed to download Shorebird"
+            exit 1
+          }
+          
           unzip -q shorebird.zip -d $HOME/.shorebird/bin
           chmod +x $HOME/.shorebird/bin/shorebird
 
           echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
-          export PATH="$HOME/.shorebird/bin:$PATH"
-
           echo "✅ Shorebird installed successfully!"
-          shorebird --version
+          $HOME/.shorebird/bin/shorebird --version
 
-
-      # 5️⃣ Check version change
+      # 5️⃣ Login to Shorebird
+      - name: Shorebird Login
+        run: |
+          export PATH="$HOME/.shorebird/bin:$PATH"
+          shorebird login --ci-token ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
+          
+      # 6️⃣ Check version change
       - name: Check version change
-        id: version
+        id: version_check
         run: |
           VERSION_FILE="pubspec.yaml"
-          VERSION=$(grep '^version:' $VERSION_FILE | awk '{print $2}')
-          echo "version=$VERSION" >> $GITHUB_ENV
-          echo "Current version: $VERSION"
-          git fetch origin main --depth=1
-          OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}' || echo "")
-          echo "old_version=$OLD_VERSION" >> $GITHUB_ENV
-
-          if [ "$VERSION" != "$OLD_VERSION" ]; then
-            echo "has_change=true" >> $GITHUB_ENV
+          CURRENT_VERSION=$(grep '^version:' $VERSION_FILE | awk '{print $2}')
+          echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Get previous version from main branch
+          git fetch origin main --depth=1 || echo "Unable to fetch main branch, assuming first build"
+          
+          if git show origin/main:pubspec.yaml 2>/dev/null | grep -q '^version:'; then
+            OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}')
+            echo "OLD_VERSION=$OLD_VERSION" >> $GITHUB_ENV
+            echo "Old version: $OLD_VERSION"
+            
+            if [ "$CURRENT_VERSION" != "$OLD_VERSION" ]; then
+              echo "VERSION_CHANGED=true" >> $GITHUB_ENV
+              echo "✅ Version changed from $OLD_VERSION to $CURRENT_VERSION"
+            else
+              echo "VERSION_CHANGED=false" >> $GITHUB_ENV
+              echo "🔄 No version change detected"
+            fi
           else
-            echo "has_change=false" >> $GITHUB_ENV
+            echo "VERSION_CHANGED=true" >> $GITHUB_ENV
+            echo "📝 First build or unable to compare versions, building release"
           fi
 
-      # 6️⃣ Build or patch using Shorebird
+      # 7️⃣ Build or patch using Shorebird
       - name: Build or Patch
         run: |
           export PATH="$HOME/.shorebird/bin:$PATH"
-          if [ "$has_change" = "true" ]; then
-            echo "🚀 Detected version change: $version"
-            echo "Building new release..."
-            shorebird release android --force
-            shorebird release ios --force
+          
+          if [ "$VERSION_CHANGED" = "true" ]; then
+            echo "🚀 Building new release (version: $CURRENT_VERSION)"
+            # Build Android release
+            shorebird release android --force --verbose || {
+              echo "❌ Android release failed, trying with flutter build first"
+              flutter build apk --release
+              shorebird release android --force --verbose
+            }
+            
+            # Build iOS release (if you have macOS runner)
+            # shorebird release ios --force --verbose
           else
-            echo "🧩 No version change, creating patch..."
-            shorebird patch android
-            shorebird patch ios
+            echo "🧩 Creating patch (no version change)"
+            # Create Android patch
+            shorebird patch android --verbose || {
+              echo "❌ Android patch failed"
+              exit 1
+            }
+            
+            # Create iOS patch (if you have macOS runner)
+            # shorebird patch ios --verbose
           fi
-        env:
-          SHOREBIRD_AUTH_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
 
-      # 7️⃣ Send to Telegram
+      # 8️⃣ Send to Telegram
       - name: Send APK to Telegram
-        if: env.has_change == 'true'
+        if: env.VERSION_CHANGED == 'true'
         run: |
-          APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" | head -n 1)
-          echo "📦 Sending $APK_PATH to Telegram..."
-          curl -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-               -F document=@"$APK_PATH" \
-               https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
+          # Find the APK file
+          APK_PATH=$(find build -name "*.apk" -type f | head -n 1)
+          if [ -z "$APK_PATH" ]; then
+            # Alternative path for Shorebird builds
+            APK_PATH=$(find . -name "*.apk" -type f | grep -v "build/android" | head -n 1)
+          fi
+          
+          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+            echo "📦 Sending $APK_PATH to Telegram..."
+            curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+                 -F document=@"$APK_PATH" \
+                 -F caption="🚀 New App Release v$CURRENT_VERSION" \
+                 https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
+          else
+            echo "❌ APK file not found"
+            find . -name "*.apk" -type f
+          fi
