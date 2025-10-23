@@ -20,25 +20,37 @@ jobs:
         with:
           flutter-version: '3.29.3'
           channel: 'stable'
-      
-      # 3️⃣ Install dependencies
+
+      # 3️⃣ Cache dependencies
+      - name: Cache Flutter dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ${{ github.workspace }}/.dart_tool
+          key: ${{ runner.os }}-flutter-${{ hashFiles('pubspec.lock') }}
+
+      # 4️⃣ Install dependencies
       - name: Install dependencies
         run: flutter pub get
 
-      # 4️⃣ Setup Shorebird using official action
+      # 5️⃣ Setup Shorebird using official action
       - name: 🐦 Setup Shorebird
         uses: shorebirdtech/setup-shorebird@v1
         with:
           cache: true
-          shorebird-token: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
 
-      # 5️⃣ Verify Shorebird authentication
-      - name: Verify Shorebird Auth
+      # 6️⃣ Manually login to Shorebird (fixes CI auth issue)
+      - name: 🔐 Shorebird Login
+        run: echo "${{ secrets.SHOREBIRD_AUTH_TOKEN }}" | shorebird login --token
+
+      # 7️⃣ Verify Shorebird authentication
+      - name: ✅ Verify Shorebird Auth
         run: |
           shorebird doctor
           echo "✅ Shorebird authentication successful"
 
-      # 6️⃣ Check version change
+      # 8️⃣ Check version change
       - name: Check version change
         id: version_check
         run: |
@@ -47,8 +59,13 @@ jobs:
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
           echo "Current version: $CURRENT_VERSION"
           
-          # Get previous version from main branch
-          git fetch origin main --depth=1 || echo "Unable to fetch main branch, assuming first build"
+          # Fetch main branch to compare versions
+          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+            git fetch origin main --depth=1
+          else
+            echo "No main branch found, skipping comparison."
+            echo "VERSION_CHANGED=true" >> $GITHUB_ENV
+          fi
           
           if git show origin/main:pubspec.yaml 2>/dev/null | grep -q '^version:'; then
             OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}')
@@ -67,27 +84,23 @@ jobs:
             echo "📝 First build or unable to compare versions, building release"
           fi
 
-      # 7️⃣ Build or patch using Shorebird
+      # 9️⃣ Build or patch using Shorebird
       - name: Build or Patch
         run: |
-         if [ "$VERSION_CHANGED" = "true" ]; then
+          if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🚀 Building new release (version: $CURRENT_VERSION)"
-            # Build Android release
             shorebird release android --no-confirm --verbose
           else
             echo "🧩 Creating patch (no version change)"
-            # Create Android patch
             shorebird patch android --no-confirm --verbose
           fi
 
-      # 8️⃣ Send to Telegram
+      # 🔟 Send to Telegram (only on new release)
       - name: Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
-          # Find the APK file - Shorebird typically puts it in the app-release directory
           APK_PATH=$(find build -name "app-release.apk" -type f | head -n 1)
           if [ -z "$APK_PATH" ]; then
-            # Alternative search pattern
             APK_PATH=$(find . -name "*.apk" -type f | grep release | head -n 1)
           fi
           
@@ -95,7 +108,8 @@ jobs:
             echo "📦 Sending $APK_PATH to Telegram..."
             curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                  -F document=@"$APK_PATH" \
-                 -F caption="🚀 New App Release v$CURRENT_VERSION" \
+                 -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
+                 -F parse_mode=Markdown \
                  https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
           else
             echo "❌ APK file not found"
