@@ -25,20 +25,39 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # 4️⃣ Setup Shorebird using official action
-      - name: 🐦 Setup Shorebird
-        uses: shorebirdtech/setup-shorebird@v1
-        with:
-          cache: true
-          shorebird-token: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
+      # 4️⃣ Manual Shorebird installation
+      - name: Install Shorebird CLI
+        run: |
+          echo "🔧 Installing Shorebird CLI..."
+          mkdir -p $HOME/.shorebird/bin
+          
+          # Download Shorebird CLI directly
+          curl -L -f "https://github.com/shorebirdtech/shorebird/releases/latest/download/shorebird-linux-x64.zip" -o shorebird.zip
+          
+          unzip -q shorebird.zip -d $HOME/.shorebird/bin
+          chmod +x $HOME/.shorebird/bin/shorebird
+          
+          echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
+          echo "✅ Shorebird installed successfully!"
+          $HOME/.shorebird/bin/shorebird --version
 
-      # 5️⃣ Verify Shorebird authentication
+      # 5️⃣ Explicit Shorebird login
+      - name: Login to Shorebird
+        run: |
+          export PATH="$HOME/.shorebird/bin:$PATH"
+          echo "🔑 Logging into Shorebird..."
+          shorebird login --ci-token "${{ secrets.SHOREBIRD_AUTH_TOKEN }}"
+          echo "✅ Login command completed"
+
+      # 6️⃣ Verify authentication
       - name: Verify Shorebird Auth
         run: |
+          export PATH="$HOME/.shorebird/bin:$PATH"
+          echo "🔍 Verifying authentication..."
           shorebird doctor
-          echo "✅ Shorebird authentication successful"
+          echo "✅ Authentication verified successfully"
 
-      # 6️⃣ Check version change
+      # 7️⃣ Check version change
       - name: Check version change
         id: version_check
         run: |
@@ -67,27 +86,25 @@ jobs:
             echo "📝 First build or unable to compare versions, building release"
           fi
 
-      # 7️⃣ Build or patch using Shorebird
+      # 8️⃣ Build or patch using Shorebird
       - name: Build or Patch
         run: |
+          export PATH="$HOME/.shorebird/bin:$PATH"
           if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🚀 Building new release (version: $CURRENT_VERSION)"
-            # Build Android release
             shorebird release android --force --verbose
           else
             echo "🧩 Creating patch (no version change)"
-            # Create Android patch
             shorebird patch android --verbose
           fi
 
-      # 8️⃣ Send to Telegram
+      # 9️⃣ Send to Telegram
       - name: Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
-          # Find the APK file - Shorebird typically puts it in the app-release directory
+          # Find the APK file
           APK_PATH=$(find build -name "app-release.apk" -type f | head -n 1)
           if [ -z "$APK_PATH" ]; then
-            # Alternative search pattern
             APK_PATH=$(find . -name "*.apk" -type f | grep release | head -n 1)
           fi
           
@@ -99,6 +116,5 @@ jobs:
                  https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
           else
             echo "❌ APK file not found"
-            echo "Searching for APK files..."
             find . -name "*.apk" -type f
           fi
