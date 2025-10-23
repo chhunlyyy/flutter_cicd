@@ -25,53 +25,15 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # 4️⃣ Install Shorebird CLI
-      - name: Install Shorebird CLI
-        run: |
-          echo "🔧 Installing Shorebird CLI..."
-          mkdir -p $HOME/.shorebird/bin
+      # 4️⃣ Setup Shorebird using official action
+      - name: 🐦 Setup Shorebird
+        uses: shorebirdtech/setup-shorebird@v1
+        with:
+          cache: true
+        env:
+          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
 
-          # Use jq to properly parse JSON response
-          LATEST_URL=$(curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest \
-            | grep -o '"browser_download_url":[^,]*' \
-            | grep "linux-x64.zip" \
-            | cut -d '"' -f 4)
-
-          # Alternative method if above fails
-          if [ -z "$LATEST_URL" ]; then
-            echo "Trying alternative download method..."
-            LATEST_URL="https://github.com/shorebirdtech/shorebird/releases/latest/download/shorebird-linux-x64.zip"
-          fi
-
-          echo "📦 Downloading from: $LATEST_URL"
-
-          if [ -z "$LATEST_URL" ]; then
-            echo "❌ Could not find Shorebird release URL."
-            echo "Available assets from latest release:"
-            curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest | grep "browser_download_url"
-            exit 1
-          fi
-
-          # Download and install
-          curl -L -f "$LATEST_URL" -o shorebird.zip || {
-            echo "❌ Failed to download Shorebird"
-            exit 1
-          }
-          
-          unzip -q shorebird.zip -d $HOME/.shorebird/bin
-          chmod +x $HOME/.shorebird/bin/shorebird
-
-          echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
-          echo "✅ Shorebird installed successfully!"
-          $HOME/.shorebird/bin/shorebird --version
-
-      # 5️⃣ Login to Shorebird
-      - name: Shorebird Login
-        run: |
-          export PATH="$HOME/.shorebird/bin:$PATH"
-          shorebird login --ci-token ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
-          
-      # 6️⃣ Check version change
+      # 5️⃣ Check version change
       - name: Check version change
         id: version_check
         run: |
@@ -100,11 +62,9 @@ jobs:
             echo "📝 First build or unable to compare versions, building release"
           fi
 
-      # 7️⃣ Build or patch using Shorebird
+      # 6️⃣ Build or patch using Shorebird
       - name: Build or Patch
         run: |
-          export PATH="$HOME/.shorebird/bin:$PATH"
-          
           if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🚀 Building new release (version: $CURRENT_VERSION)"
             # Build Android release
@@ -128,7 +88,7 @@ jobs:
             # shorebird patch ios --verbose
           fi
 
-      # 8️⃣ Send to Telegram
+      # 7️⃣ Send to Telegram
       - name: Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
