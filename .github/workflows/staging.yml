@@ -18,11 +18,13 @@ jobs:
         with:
           flutter-version: '3.29.3'
 
-      - name: Setup Shorebird
+      - name: Install Shorebird
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://shorebird.dev/install.sh | bash
-          export PATH="$HOME/.shorebird/bin:$PATH"
-          shorebird doctor
+          curl -sSf https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh | bash
+          echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
+
+      - name: Verify Shorebird
+        run: shorebird doctor
 
       - name: Read version from pubspec.yaml
         id: version
@@ -34,46 +36,52 @@ jobs:
       - name: Get previous version from last successful build
         id: prev_version
         run: |
-          echo "prev_version=$(gh run list --branch staging --status success --limit 1 --json name,displayTitle --jq '.[0].displayTitle' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')" >> $GITHUB_ENV || true
+          prev_version=$(gh run list --branch staging --status success --limit 1 --json displayTitle --jq '.[0].displayTitle' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
+          echo "prev_version=$prev_version" >> $GITHUB_ENV
+          echo "Previous version: $prev_version"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compare version
         id: compare
         run: |
-          if [ "$version" != "$prev_version" ]; then
+          if [ "${{ env.version }}" != "${{ env.prev_version }}" ]; then
             echo "has_version_change=true" >> $GITHUB_ENV
+            echo "🔄 Version changed from ${{ env.prev_version }} → ${{ env.version }}"
           else
             echo "has_version_change=false" >> $GITHUB_ENV
+            echo "✅ Version unchanged: ${{ env.version }}"
           fi
 
-      - name: Flutter clean & get
+      - name: Flutter clean & pub get
         run: |
           flutter clean
           flutter pub get
 
-      - name: Build or Patch
+      - name: Build or Patch with Shorebird
         run: |
-          export PATH="$HOME/.shorebird/bin:$PATH"
           if [ "$has_version_change" = "true" ]; then
             echo "🆕 New version detected — building full release..."
-            shorebird release android --flavor staging
+            shorebird release android --flavor staging --artifact appbundle
             shorebird release ios --flavor staging --export-method app-store
           else
             echo "🔁 No version change — creating patch..."
             shorebird patch android --flavor staging
             shorebird patch ios --flavor staging
           fi
+        env:
+          SHOREBIRD_AUTH_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
 
-      - name: Send APK to Telegram (if version change)
+      - name: Send APK to Telegram (only if version changed)
         if: env.has_version_change == 'true'
         run: |
           APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" | head -n 1)
-          curl -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-               -F document=@"$APK_PATH" \
-               -F caption="📱 New Staging Build: v${{ env.version }}" \
-               https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
-
-
-#8178167192:AAG4AXaYDZ62L4emJ9CyQj5O2iZToxy3tjw
-#584161429
+          if [ -f "$APK_PATH" ]; then
+            echo "📤 Sending APK to Telegram..."
+            curl -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+                 -F document=@"$APK_PATH" \
+                 -F caption="📱 New Staging Build: v${{ env.version }}" \
+                 https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
+          else
+            echo "⚠️ APK not found at $APK_PATH"
+          fi
