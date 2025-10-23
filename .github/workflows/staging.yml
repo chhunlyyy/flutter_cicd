@@ -59,9 +59,15 @@ jobs:
         id: version_check
         run: |
           VERSION_FILE="pubspec.yaml"
+
           CURRENT_VERSION=$(grep '^version:' $VERSION_FILE | awk '{print $2}')
+          RELEASE_VERSION=$(grep '^release_version:' $VERSION_FILE | awk '{print $2}')
+
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
+          echo "RELEASE_VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
+
           echo "Current version: $CURRENT_VERSION"
+          echo "Release version: $RELEASE_VERSION"
 
           git fetch origin main --depth=1 || echo "Unable to fetch main branch."
           if git show origin/main:pubspec.yaml 2>/dev/null | grep -q '^version:'; then
@@ -79,12 +85,12 @@ jobs:
             echo "📝 First build or unable to compare versions"
           fi
 
-      # 8️⃣ Run Shorebird Release or Patch (dynamic Flutter version)
+      # 8️⃣ Run Shorebird Release or Patch (dynamic Flutter + release_version)
       - name: 🚀 Shorebird Release or Patch
         run: |
-          v="$CURRENT_VERSION"
           echo "📌 Using Flutter version: $FLUTTER_VERSION"
-          
+          echo "📦 Using release version: $RELEASE_VERSION"
+
           if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🆕 Building new release (.apk)..."
             yes | shorebird release android \
@@ -92,10 +98,10 @@ jobs:
               --flutter-version="$FLUTTER_VERSION" \
               -- --no-tree-shake-icons
           else
-            echo "🧩 Creating patch for version $v..."
+            echo "🧩 Creating patch for release version $RELEASE_VERSION..."
             yes | shorebird patch \
               --platforms=android \
-              --release-version="$v" \
+              --release-version="$RELEASE_VERSION" \
               --allow-native-diffs \
               --allow-asset-diffs
           fi
