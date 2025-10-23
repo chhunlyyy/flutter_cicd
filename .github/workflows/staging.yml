@@ -20,14 +20,25 @@ jobs:
         with:
           flutter-version: '3.29.3'
 
-      # 🧩 Step 3: Install and Verify Shorebird
-      - name: Install and Verify Shorebird
+      # 🧩 Step 3: Install Shorebird and make it available for all steps
+      - name: Install Shorebird
         run: |
+          echo "📦 Installing Shorebird CLI..."
           curl -sSf https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh | bash
-          export PATH="$HOME/.shorebird/bin:$PATH"
-          shorebird doctor
+          echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
+          echo "✅ Shorebird installed to $HOME/.shorebird/bin"
 
-      # 🧩 Step 4: Read version from pubspec.yaml
+      # 🧩 Step 4: Verify Shorebird installation
+      - name: Verify Shorebird
+        run: |
+          echo "🧩 Verifying Shorebird CLI..."
+          ls -la $HOME/.shorebird/bin
+          which shorebird || echo "⚠️ Shorebird not found in PATH"
+          export PATH="$HOME/.shorebird/bin:$PATH"
+          shorebird doctor || echo "⚠️ Shorebird doctor failed"
+          shorebird --version
+
+      # 🧩 Step 5: Read version from pubspec.yaml
       - name: Read version from pubspec.yaml
         id: version
         run: |
@@ -35,7 +46,7 @@ jobs:
           echo "version=${version_line#version: }" >> $GITHUB_ENV
           echo "Detected version: ${version_line#version: }"
 
-      # 🧩 Step 5: Get previous version from last successful build
+      # 🧩 Step 6: Get previous version from last successful build
       - name: Get previous version from last successful build
         id: prev_version
         run: |
@@ -45,7 +56,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 🧩 Step 6: Compare version change
+      # 🧩 Step 7: Compare version
       - name: Compare version
         id: compare
         run: |
@@ -57,13 +68,13 @@ jobs:
             echo "✅ Version unchanged: ${{ env.version }}"
           fi
 
-      # 🧩 Step 7: Prepare Flutter project
+      # 🧩 Step 8: Flutter clean & pub get
       - name: Flutter clean & pub get
         run: |
           flutter clean
           flutter pub get
 
-      # 🧩 Step 8: Build or Patch with Shorebird
+      # 🧩 Step 9: Build or Patch with Shorebird
       - name: Build or Patch with Shorebird
         run: |
           export PATH="$HOME/.shorebird/bin:$PATH"
@@ -79,7 +90,7 @@ jobs:
         env:
           SHOREBIRD_AUTH_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
 
-      # 🧩 Step 9: Send APK to Telegram if new version
+      # 🧩 Step 10: Send APK to Telegram (if new version)
       - name: Send APK to Telegram (only if version changed)
         if: env.has_version_change == 'true'
         run: |
