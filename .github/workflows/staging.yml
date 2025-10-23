@@ -21,16 +21,16 @@ jobs:
       - name: 📚 Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Ensure we have the last commit for version comparison
+          fetch-depth: 2
 
-      # 2️⃣ Setup Flutter
+      # 2️⃣ Setup Flutter SDK
       - name: 🐦 Setup Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
 
-      # 3️⃣ Cache dependencies for faster builds
+      # 3️⃣ Cache dependencies
       - name: 💾 Cache Flutter dependencies
         uses: actions/cache@v4
         with:
@@ -56,20 +56,14 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # 7️⃣ Check version change (compare current vs previous commit)
+      # 7️⃣ Check version change
       - name: 🔍 Check version change
         id: version_check
         run: |
           VERSION_FILE="pubspec.yaml"
-
           CURRENT_VERSION=$(grep '^version:' $VERSION_FILE | awk '{print $2}')
-          RELEASE_VERSION=$(grep '^release_version:' $VERSION_FILE | awk '{print $2}')
-
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
-          echo "RELEASE_VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
-
           echo "📦 Current version: $CURRENT_VERSION"
-          echo "🏷️  Release version: $RELEASE_VERSION"
 
           if git show HEAD~1:$VERSION_FILE >/dev/null 2>&1; then
             OLD_VERSION=$(git show HEAD~1:$VERSION_FILE | grep '^version:' | awk '{print $2}')
@@ -92,7 +86,7 @@ jobs:
       - name: 🚀 Create Shorebird Release or Patch
         run: |
           echo "📌 Flutter version: $FLUTTER_VERSION"
-          echo "📦 Release version: $RELEASE_VERSION"
+          echo "📦 App version: $CURRENT_VERSION"
 
           if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🆕 Building new release (.apk)..."
@@ -101,39 +95,41 @@ jobs:
               --artifact=apk \
               --flutter-version="$FLUTTER_VERSION"
           else
-            echo "🧩 Creating patch for release version $RELEASE_VERSION..."
+            echo "🧩 Creating patch for version $CURRENT_VERSION..."
             shorebird patch \
               --platforms=android \
-              --release-version="$RELEASE_VERSION" \
+              --release-version="$CURRENT_VERSION" \
               --no-confirm --verbose \
               --allow-native-diffs \
               --allow-asset-diffs
           fi
 
-      # 9️⃣ Send new APK to Telegram (only for version changes)
-      - name: 📤 Send APK to Telegram
-        if: env.VERSION_CHANGED == 'true'
+      # 9️⃣ Send to Telegram
+      - name: 📤 Notify Telegram
         run: |
-          set +e  # Avoid stopping the job if file not found
+          if [ "$VERSION_CHANGED" = "true" ]; then
+            echo "📤 Sending new release APK to Telegram..."
+            APK_PATH=$(find build/app/outputs/flutter-apk -type f -name "*release*.apk" | head -n 1)
 
-          echo "🔍 Searching for release APK..."
-          APK_PATH=$(find build/app/outputs/flutter-apk -type f -name "*release*.apk" | head -n 1)
+            if [ -z "$APK_PATH" ]; then
+              echo "⚠️ APK not found. Searching in full repo..."
+              APK_PATH=$(find . -type f -name "*release*.apk" | head -n 1)
+            fi
 
-          if [ -z "$APK_PATH" ]; then
-            echo "⚠️ APK not found in expected path. Searching entire repo..."
-            APK_PATH=$(find . -type f -name "*release*.apk" | head -n 1)
-          fi
-
-          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
-            echo "✅ Found APK: $APK_PATH"
-            echo "📦 Uploading to Telegram..."
-            curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                -F document=@"$APK_PATH" \
-                -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
-                -F parse_mode=Markdown \
-                https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
+            if [ -n "$APK_PATH" ]; then
+              echo "✅ Found APK: $APK_PATH"
+              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+                  -F document=@"$APK_PATH" \
+                  -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
+                  -F parse_mode=Markdown \
+                  https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
+            else
+              echo "❌ No APK found!"
+            fi
           else
-            echo "❌ No APK found!"
-            echo "Listing build outputs for debugging:"
-            find build/ -type f | head -n 50
+            echo "📩 Sending new patch notification to Telegram..."
+            curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+              -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+              -d text="🧩 *New Patch Created*%0A📦 Version: v$CURRENT_VERSION%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
+              -d parse_mode="Markdown"
           fi
