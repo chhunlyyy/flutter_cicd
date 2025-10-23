@@ -97,7 +97,8 @@ jobs:
               --no-confirm --verbose \
               --artifact=apk \
               --flutter-version="$FLUTTER_VERSION" \
-              --no-tree-shake-icons \
+              --no-tree-shake-icons
+              
           else
             echo "🧩 Creating patch for release version $RELEASE_VERSION..."
               shorebird patch \
