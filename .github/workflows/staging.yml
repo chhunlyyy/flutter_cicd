@@ -93,19 +93,27 @@ jobs:
       - name: 📤 Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
-          APK_PATH=$(find build -name "app-release.apk" -type f | head -n 1)
-          if [ -z "$APK_PATH" ]; then
-            APK_PATH=$(find . -name "*.apk" -type f | grep release | head -n 1)
-          fi
+          set +e  # ⛔ Prevent script from stopping on errors
           
-          if [ -n "$APK_PATH" ]; then
-            echo "📦 Sending $APK_PATH to Telegram..."
-            curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-                 -F document=@"$APK_PATH" \
-                 -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
-                 -F parse_mode=Markdown \
-                 https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
-          else
-            echo "❌ No APK found!"
-            find . -name "*.apk" -type f
+          echo "🔍 Searching for APK file..."
+          APK_PATH=$(find . -type f -name "app-release.apk" | head -n 1)
+
+          if [ -z "$APK_PATH" ]; then
+            echo "⚠️ app-release.apk not found, searching all APKs..."
+            APK_PATH=$(find . -type f -name "*.apk" | grep release | head -n 1)
           fi
+
+          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+            echo "✅ Found APK: $APK_PATH"
+            echo "📦 Sending to Telegram..."
+            curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+                -F document=@"$APK_PATH" \
+                -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
+                -F parse_mode=Markdown \
+                https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
+          else
+            echo "❌ APK file not found!"
+            echo "Listing available build outputs for debugging:"
+            find build/ -type f | head -n 20
+          fi
+
