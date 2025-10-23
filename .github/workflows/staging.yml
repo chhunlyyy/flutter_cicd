@@ -30,10 +30,15 @@ jobs:
         run: |
           echo "🔧 Installing Shorebird CLI..."
           mkdir -p $HOME/.shorebird/bin
-          curl -L https://github.com/shorebirdtech/shorebird/releases/latest/download/shorebird_linux.tar.gz -o shorebird.tar.gz
-          tar -xzf shorebird.tar.gz -C $HOME/.shorebird/bin
-          export PATH="$HOME/.shorebird/bin:$PATH"
+          LATEST_URL=$(curl -s https://api.github.com/repos/shorebirdtech/shorebird/releases/latest \
+            | grep "browser_download_url.*linux" \
+            | cut -d '"' -f 4)
+          echo "Downloading from: $LATEST_URL"
+          curl -L "$LATEST_URL" -o shorebird.zip
+          unzip shorebird.zip -d $HOME/.shorebird/bin
+          chmod +x $HOME/.shorebird/bin/shorebird
           echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
+          export PATH="$HOME/.shorebird/bin:$PATH"
           shorebird --version
 
       # 5️⃣ Check version change
