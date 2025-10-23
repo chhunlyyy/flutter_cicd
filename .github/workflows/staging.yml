@@ -5,24 +5,30 @@ on:
     branches:
       - staging
 
+env:
+  SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
 
     steps:
-      # 1️⃣ Checkout repository
-      - name: Checkout repository
+      # 1️⃣ Checkout code
+      - name: 📚 Git Checkout
         uses: actions/checkout@v4
 
       # 2️⃣ Setup Flutter
-      - name: Setup Flutter
+      - name: 🐦 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.29.3'
           channel: 'stable'
 
       # 3️⃣ Cache dependencies
-      - name: Cache Flutter dependencies
+      - name: 💾 Cache Flutter dependencies
         uses: actions/cache@v4
         with:
           path: |
@@ -31,29 +37,24 @@ jobs:
           key: ${{ runner.os }}-flutter-${{ hashFiles('pubspec.lock') }}
 
       # 4️⃣ Install dependencies
-      - name: Install dependencies
+      - name: 📦 Install dependencies
         run: flutter pub get
 
-      # 5️⃣ Setup Shorebird using official action
+      # 5️⃣ Setup Shorebird CLI
       - name: 🐦 Setup Shorebird
         uses: shorebirdtech/setup-shorebird@v1
         with:
           cache: true
 
-      # 6️⃣ Restore Shorebird Auth (use Base64-encoded secret)
-      - name: 🔐 Setup Shorebird Auth
-        run: |
-          mkdir -p ~/.config/shorebird
-          echo "$SHOREBIRD_AUTH" | base64 --decode > ~/.config/shorebird/access_tokens.json
+      # 6️⃣ Setup Java (required for Android build)
+      - name: ☕ Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
 
-      # 7️⃣ Verify Shorebird authentication
-      - name: ✅ Verify Shorebird Auth
-        run: |
-          shorebird doctor || exit 1
-          echo "✅ Shorebird authentication successful"
-
-      # 8️⃣ Check version change
-      - name: Check version change
+      # 7️⃣ Check if version changed compared to main
+      - name: 🔍 Check version change
         id: version_check
         run: |
           VERSION_FILE="pubspec.yaml"
@@ -61,37 +62,34 @@ jobs:
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
           echo "Current version: $CURRENT_VERSION"
 
-          # Fetch main branch for comparison
-          if git fetch origin main --depth=1 2>/dev/null; then
-            if git show origin/main:pubspec.yaml 2>/dev/null | grep -q '^version:'; then
-              OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}')
-              echo "OLD_VERSION=$OLD_VERSION" >> $GITHUB_ENV
-              echo "Old version: $OLD_VERSION"
-              if [ "$CURRENT_VERSION" != "$OLD_VERSION" ]; then
-                echo "VERSION_CHANGED=true" >> $GITHUB_ENV
-                echo "✅ Version changed from $OLD_VERSION to $CURRENT_VERSION"
-              else
-                echo "VERSION_CHANGED=false" >> $GITHUB_ENV
-                echo "🔄 No version change detected"
-              fi
+          git fetch origin main --depth=1 || echo "Unable to fetch main branch."
+          if git show origin/main:pubspec.yaml 2>/dev/null | grep -q '^version:'; then
+            OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}')
+            echo "OLD_VERSION=$OLD_VERSION" >> $GITHUB_ENV
+            if [ "$CURRENT_VERSION" != "$OLD_VERSION" ]; then
+              echo "VERSION_CHANGED=true" >> $GITHUB_ENV
+              echo "✅ Version changed from $OLD_VERSION to $CURRENT_VERSION"
+            else
+              echo "VERSION_CHANGED=false" >> $GITHUB_ENV
+              echo "🔄 No version change detected"
             fi
           else
-            echo "📝 First build or no main branch found"
             echo "VERSION_CHANGED=true" >> $GITHUB_ENV
+            echo "📝 First build or unable to compare versions"
           fi
 
-      # 9️⃣ Build or Patch using Shorebird
-      - name: Build or Patch
+      # 8️⃣ Run Shorebird Release or Patch
+      - name: 🚀 Shorebird Build or Patch
         run: |
           if [ "$VERSION_CHANGED" = "true" ]; then
-            echo "🚀 Building new release (version: $CURRENT_VERSION)"
+            echo "🆕 Building new release..."
             shorebird release android --no-confirm --verbose
           else
-            echo "🧩 Creating patch (no version change)"
+            echo "🧩 Creating patch..."
             shorebird patch android --no-confirm --verbose
           fi
 
-      # 🔟 Send to Telegram (only on new release)
+      # 9️⃣ Send APK to Telegram (only for new releases)
       - name: 📤 Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
@@ -99,8 +97,8 @@ jobs:
           if [ -z "$APK_PATH" ]; then
             APK_PATH=$(find . -name "*.apk" -type f | grep release | head -n 1)
           fi
-
-          if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
+          
+          if [ -n "$APK_PATH" ]; then
             echo "📦 Sending $APK_PATH to Telegram..."
             curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                  -F document=@"$APK_PATH" \
@@ -108,6 +106,6 @@ jobs:
                  -F parse_mode=Markdown \
                  https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
           else
-            echo "❌ APK file not found"
+            echo "❌ No APK found!"
             find . -name "*.apk" -type f
           fi
