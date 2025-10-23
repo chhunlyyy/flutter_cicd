@@ -96,7 +96,7 @@ jobs:
               shorebird release android \
               --no-confirm --verbose \
               --artifact=apk \
-              --flutter-version="$FLUTTER_VERSION" \
+              --flutter-version="$FLUTTER_VERSION"
           else
             echo "🧩 Creating patch for release version $RELEASE_VERSION..."
               shorebird patch \
