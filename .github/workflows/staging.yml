@@ -7,6 +7,7 @@ on:
 
 env:
   SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
+  FLUTTER_VERSION: '3.29.3'
 
 jobs:
   build:
@@ -24,7 +25,7 @@ jobs:
       - name: 🐦 Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.3'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
 
       # 3️⃣ Cache dependencies
@@ -78,15 +79,25 @@ jobs:
             echo "📝 First build or unable to compare versions"
           fi
 
-      # 8️⃣ Run Shorebird Release or Patch
-      - name: 🚀 Shorebird Build or Patch
+      # 8️⃣ Run Shorebird Release or Patch (dynamic Flutter version)
+      - name: 🚀 Shorebird Release or Patch
         run: |
+          v="$CURRENT_VERSION"
+          echo "📌 Using Flutter version: $FLUTTER_VERSION"
+          
           if [ "$VERSION_CHANGED" = "true" ]; then
-            echo "🆕 Building new release..."
-            shorebird release android --no-confirm --verbose
+            echo "🆕 Building new release (.apk)..."
+            yes | shorebird release android \
+              --artifact=apk \
+              --flutter-version="$FLUTTER_VERSION" \
+              -- --no-tree-shake-icons
           else
-            echo "🧩 Creating patch..."
-            shorebird patch android --no-confirm --verbose
+            echo "🧩 Creating patch for version $v..."
+            yes | shorebird patch \
+              --platforms=android \
+              --release-version="$v" \
+              --allow-native-diffs \
+              --allow-asset-diffs
           fi
 
       # 9️⃣ Send APK to Telegram (only for new releases)
@@ -96,10 +107,8 @@ jobs:
           set +e  # Don't exit on error
 
           echo "🔍 Searching for APK file..."
-          # Look inside Flutter’s known build path first
           APK_PATH=$(find build/app/outputs/flutter-apk -type f -name "*release*.apk" | head -n 1)
 
-          # Fallback if not found (search everywhere)
           if [ -z "$APK_PATH" ]; then
             echo "⚠️ app-release.apk not found in default path, searching entire repo..."
             APK_PATH=$(find . -type f -name "*release*.apk" | head -n 1)
@@ -118,4 +127,3 @@ jobs:
             echo "Listing available build outputs for debugging:"
             find build/ -type f | head -n 50
           fi
-
