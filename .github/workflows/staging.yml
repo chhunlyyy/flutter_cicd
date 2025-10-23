@@ -93,14 +93,16 @@ jobs:
       - name: 📤 Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
-          set +e  # ⛔ Prevent script from stopping on errors
-          
-          echo "🔍 Searching for APK file..."
-          APK_PATH=$(find . -type f -name "app-release.apk" | head -n 1)
+          set +e  # Don't exit on error
 
+          echo "🔍 Searching for APK file..."
+          # Look inside Flutter’s known build path first
+          APK_PATH=$(find build/app/outputs/flutter-apk -type f -name "*release*.apk" | head -n 1)
+
+          # Fallback if not found (search everywhere)
           if [ -z "$APK_PATH" ]; then
-            echo "⚠️ app-release.apk not found, searching all APKs..."
-            APK_PATH=$(find . -type f -name "*.apk" | grep release | head -n 1)
+            echo "⚠️ app-release.apk not found in default path, searching entire repo..."
+            APK_PATH=$(find . -type f -name "*release*.apk" | head -n 1)
           fi
 
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
@@ -114,6 +116,6 @@ jobs:
           else
             echo "❌ APK file not found!"
             echo "Listing available build outputs for debugging:"
-            find build/ -type f | head -n 20
+            find build/ -type f | head -n 50
           fi
 
