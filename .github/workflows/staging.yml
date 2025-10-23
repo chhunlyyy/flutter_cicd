@@ -1,4 +1,4 @@
-name: Flutter CI/CD with Shorebird
+name: 🐦 Flutter CI/CD with Shorebird
 
 on:
   push:
@@ -17,18 +17,20 @@ jobs:
         shell: bash
 
     steps:
-      # 1️⃣ Checkout code
-      - name: 📚 Git Checkout
+      # 1️⃣ Checkout the repository
+      - name: 📚 Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Ensure we have the last commit for version comparison
 
       # 2️⃣ Setup Flutter
-      - name: 🐦 Setup Flutter
+      - name: 🐦 Setup Flutter SDK
         uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: 'stable'
+          channel: stable
 
-      # 3️⃣ Cache dependencies
+      # 3️⃣ Cache dependencies for faster builds
       - name: 💾 Cache Flutter dependencies
         uses: actions/cache@v4
         with:
@@ -42,19 +44,19 @@ jobs:
         run: flutter pub get
 
       # 5️⃣ Setup Shorebird CLI
-      - name: 🐦 Setup Shorebird
+      - name: 🐥 Setup Shorebird CLI
         uses: shorebirdtech/setup-shorebird@v1
         with:
           cache: true
 
-      # 6️⃣ Setup Java (required for Android build)
+      # 6️⃣ Setup Java (required for Android builds)
       - name: ☕ Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: temurin
+          java-version: 17
 
-      # 7️⃣ Check if version changed compared to main
+      # 7️⃣ Check version change (compare current vs previous commit)
       - name: 🔍 Check version change
         id: version_check
         run: |
@@ -66,72 +68,72 @@ jobs:
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
           echo "RELEASE_VERSION=$RELEASE_VERSION" >> $GITHUB_ENV
 
-          echo "Current version: $CURRENT_VERSION"
-          echo "Release version: $RELEASE_VERSION"
+          echo "📦 Current version: $CURRENT_VERSION"
+          echo "🏷️  Release version: $RELEASE_VERSION"
 
-          git fetch origin main --depth=1 || echo "Unable to fetch main branch."
-          if git show origin/main:pubspec.yaml 2>/dev/null | grep -q '^version:'; then
-            OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}')
+          if git show HEAD~1:$VERSION_FILE >/dev/null 2>&1; then
+            OLD_VERSION=$(git show HEAD~1:$VERSION_FILE | grep '^version:' | awk '{print $2}')
             echo "OLD_VERSION=$OLD_VERSION" >> $GITHUB_ENV
+            echo "🕐 Previous version: $OLD_VERSION"
+
             if [ "$CURRENT_VERSION" != "$OLD_VERSION" ]; then
               echo "VERSION_CHANGED=true" >> $GITHUB_ENV
-              echo "✅ Version changed from $OLD_VERSION to $CURRENT_VERSION"
+              echo "✅ Version changed from $OLD_VERSION ➜ $CURRENT_VERSION"
             else
               echo "VERSION_CHANGED=false" >> $GITHUB_ENV
-              echo "🔄 No version change detected"
+              echo "🔄 No version change detected."
             fi
           else
             echo "VERSION_CHANGED=true" >> $GITHUB_ENV
-            echo "📝 First build or unable to compare versions"
+            echo "📝 First commit or unable to compare versions."
           fi
 
-      # 8️⃣ Run Shorebird Release or Patch (dynamic Flutter + release_version)
-      - name: 🚀 Shorebird Release or Patch
+      # 8️⃣ Run Shorebird Release or Patch
+      - name: 🚀 Create Shorebird Release or Patch
         run: |
-          echo "📌 Using Flutter version: $FLUTTER_VERSION"
-          echo "📦 Using release version: $RELEASE_VERSION"
+          echo "📌 Flutter version: $FLUTTER_VERSION"
+          echo "📦 Release version: $RELEASE_VERSION"
 
           if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🆕 Building new release (.apk)..."
-              shorebird release android \
+            shorebird release android \
               --no-confirm --verbose \
               --artifact=apk \
               --flutter-version="$FLUTTER_VERSION"
           else
             echo "🧩 Creating patch for release version $RELEASE_VERSION..."
-              shorebird patch \
+            shorebird patch \
               --platforms=android \
               --release-version="$RELEASE_VERSION" \
               --no-confirm --verbose \
               --allow-native-diffs \
               --allow-asset-diffs
-              
           fi
 
-      # 9️⃣ Send APK to Telegram (only for new releases)
+      # 9️⃣ Send new APK to Telegram (only for version changes)
       - name: 📤 Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
-          set +e  # Don't exit on error
+          set +e  # Avoid stopping the job if file not found
 
-          echo "🔍 Searching for APK file..."
+          echo "🔍 Searching for release APK..."
           APK_PATH=$(find build/app/outputs/flutter-apk -type f -name "*release*.apk" | head -n 1)
 
           if [ -z "$APK_PATH" ]; then
-            echo "⚠️ app-release.apk not found in default path, searching entire repo..."
+            echo "⚠️ APK not found in expected path. Searching entire repo..."
             APK_PATH=$(find . -type f -name "*release*.apk" | head -n 1)
           fi
 
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
             echo "✅ Found APK: $APK_PATH"
-            echo "📦 Sending to Telegram..."
+            echo "📦 Uploading to Telegram..."
             curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                 -F document=@"$APK_PATH" \
                 -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
                 -F parse_mode=Markdown \
                 https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
           else
-            echo "❌ APK file not found!"
-            echo "Listing available build outputs for debugging:"
+            echo "❌ No APK found!"
+            echo "Listing build outputs for debugging:"
             find build/ -type f | head -n 50
           fi
