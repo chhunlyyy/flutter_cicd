@@ -30,10 +30,15 @@ jobs:
         uses: shorebirdtech/setup-shorebird@v1
         with:
           cache: true
-        env:
-          SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
+          shorebird-token: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
 
-      # 5️⃣ Check version change
+      # 5️⃣ Verify Shorebird authentication
+      - name: Verify Shorebird Auth
+        run: |
+          shorebird doctor
+          echo "✅ Shorebird authentication successful"
+
+      # 6️⃣ Check version change
       - name: Check version change
         id: version_check
         run: |
@@ -62,41 +67,28 @@ jobs:
             echo "📝 First build or unable to compare versions, building release"
           fi
 
-      # 6️⃣ Build or patch using Shorebird
+      # 7️⃣ Build or patch using Shorebird
       - name: Build or Patch
         run: |
           if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🚀 Building new release (version: $CURRENT_VERSION)"
             # Build Android release
-            shorebird release android --force --verbose || {
-              echo "❌ Android release failed, trying with flutter build first"
-              flutter build apk --release
-              shorebird release android --force --verbose
-            }
-            
-            # Build iOS release (if you have macOS runner)
-            # shorebird release ios --force --verbose
+            shorebird release android --force --verbose
           else
             echo "🧩 Creating patch (no version change)"
             # Create Android patch
-            shorebird patch android --verbose || {
-              echo "❌ Android patch failed"
-              exit 1
-            }
-            
-            # Create iOS patch (if you have macOS runner)
-            # shorebird patch ios --verbose
+            shorebird patch android --verbose
           fi
 
-      # 7️⃣ Send to Telegram
+      # 8️⃣ Send to Telegram
       - name: Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
-          # Find the APK file
-          APK_PATH=$(find build -name "*.apk" -type f | head -n 1)
+          # Find the APK file - Shorebird typically puts it in the app-release directory
+          APK_PATH=$(find build -name "app-release.apk" -type f | head -n 1)
           if [ -z "$APK_PATH" ]; then
-            # Alternative path for Shorebird builds
-            APK_PATH=$(find . -name "*.apk" -type f | grep -v "build/android" | head -n 1)
+            # Alternative search pattern
+            APK_PATH=$(find . -name "*.apk" -type f | grep release | head -n 1)
           fi
           
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
@@ -107,5 +99,6 @@ jobs:
                  https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
           else
             echo "❌ APK file not found"
+            echo "Searching for APK files..."
             find . -name "*.apk" -type f
           fi
