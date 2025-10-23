@@ -1,4 +1,4 @@
-name: Flutter CI/CD (Staging)
+name: Flutter CI/CD with Shorebird
 
 on:
   push:
@@ -10,97 +10,73 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 🧩 Step 1: Checkout code
+      # 1️⃣ Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 🧩 Step 2: Setup Flutter SDK
+      # 2️⃣ Setup Flutter
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.3'
+          flutter-version: '3.24.0'
+          channel: 'stable'
+      
+      # 3️⃣ Install dependencies
+      - name: Install dependencies
+        run: flutter pub get
 
-      # 🧩 Step 3: Install Shorebird and make it available for all steps
-      - name: Install Shorebird
+      # 4️⃣ Install Shorebird manually
+      - name: Install Shorebird CLI
         run: |
-          echo "📦 Installing Shorebird CLI..."
-          curl -sSf https://raw.githubusercontent.com/shorebirdtech/install/main/install.sh | bash
-          echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
-          echo "✅ Shorebird installed to $HOME/.shorebird/bin"
-
-      # 🧩 Step 4: Verify Shorebird installation
-      - name: Verify Shorebird
-        run: |
-          echo "🧩 Verifying Shorebird CLI..."
-          ls -la $HOME/.shorebird/bin
-          which shorebird || echo "⚠️ Shorebird not found in PATH"
+          echo "🔧 Installing Shorebird CLI..."
+          mkdir -p $HOME/.shorebird/bin
+          curl -L https://github.com/shorebirdtech/shorebird/releases/latest/download/shorebird_linux.tar.gz -o shorebird.tar.gz
+          tar -xzf shorebird.tar.gz -C $HOME/.shorebird/bin
           export PATH="$HOME/.shorebird/bin:$PATH"
-          shorebird doctor || echo "⚠️ Shorebird doctor failed"
+          echo "$HOME/.shorebird/bin" >> $GITHUB_PATH
           shorebird --version
 
-      # 🧩 Step 5: Read version from pubspec.yaml
-      - name: Read version from pubspec.yaml
+      # 5️⃣ Check version change
+      - name: Check version change
         id: version
         run: |
-          version_line=$(grep '^version:' pubspec.yaml | head -n 1)
-          echo "version=${version_line#version: }" >> $GITHUB_ENV
-          echo "Detected version: ${version_line#version: }"
+          VERSION_FILE="pubspec.yaml"
+          VERSION=$(grep '^version:' $VERSION_FILE | awk '{print $2}')
+          echo "version=$VERSION" >> $GITHUB_ENV
+          echo "Current version: $VERSION"
+          git fetch origin main --depth=1
+          OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}' || echo "")
+          echo "old_version=$OLD_VERSION" >> $GITHUB_ENV
 
-      # 🧩 Step 6: Get previous version from last successful build
-      - name: Get previous version from last successful build
-        id: prev_version
-        run: |
-          prev_version=$(gh run list --branch staging --status success --limit 1 --json displayTitle --jq '.[0].displayTitle' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || true)
-          echo "prev_version=$prev_version" >> $GITHUB_ENV
-          echo "Previous version: $prev_version"
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # 🧩 Step 7: Compare version
-      - name: Compare version
-        id: compare
-        run: |
-          if [ "${{ env.version }}" != "${{ env.prev_version }}" ]; then
-            echo "has_version_change=true" >> $GITHUB_ENV
-            echo "🔄 Version changed from ${{ env.prev_version }} → ${{ env.version }}"
+          if [ "$VERSION" != "$OLD_VERSION" ]; then
+            echo "has_change=true" >> $GITHUB_ENV
           else
-            echo "has_version_change=false" >> $GITHUB_ENV
-            echo "✅ Version unchanged: ${{ env.version }}"
+            echo "has_change=false" >> $GITHUB_ENV
           fi
 
-      # 🧩 Step 8: Flutter clean & pub get
-      - name: Flutter clean & pub get
-        run: |
-          flutter clean
-          flutter pub get
-
-      # 🧩 Step 9: Build or Patch with Shorebird
-      - name: Build or Patch with Shorebird
+      # 6️⃣ Build or patch using Shorebird
+      - name: Build or Patch
         run: |
           export PATH="$HOME/.shorebird/bin:$PATH"
-          if [ "$has_version_change" = "true" ]; then
-            echo "🆕 New version detected — building full release..."
-            shorebird release android --flavor staging --artifact appbundle
-            shorebird release ios --flavor staging --export-method app-store
+          if [ "$has_change" = "true" ]; then
+            echo "🚀 Detected version change: $version"
+            echo "Building new release..."
+            shorebird release android --force
+            shorebird release ios --force
           else
-            echo "🔁 No version change — creating patch..."
-            shorebird patch android --flavor staging
-            shorebird patch ios --flavor staging
+            echo "🧩 No version change, creating patch..."
+            shorebird patch android
+            shorebird patch ios
           fi
         env:
           SHOREBIRD_AUTH_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
 
-      # 🧩 Step 10: Send APK to Telegram (if new version)
-      - name: Send APK to Telegram (only if version changed)
-        if: env.has_version_change == 'true'
+      # 7️⃣ Send to Telegram
+      - name: Send APK to Telegram
+        if: env.has_change == 'true'
         run: |
           APK_PATH=$(find build/app/outputs/flutter-apk -name "*.apk" | head -n 1)
-          if [ -f "$APK_PATH" ]; then
-            echo "📤 Sending APK to Telegram..."
-            curl -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
-                 -F document=@"$APK_PATH" \
-                 -F caption="📱 New *Staging Build* uploaded! Version: *v${{ env.version }}*" \
-                 https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
-          else
-            echo "⚠️ APK not found at $APK_PATH"
-          fi
+          echo "📦 Sending $APK_PATH to Telegram..."
+          curl -F chat_id=${{ secrets.TELEGRAM_CHAT_ID }} \
+               -F document=@"$APK_PATH" \
+               https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
