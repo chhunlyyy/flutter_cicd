@@ -40,14 +40,16 @@ jobs:
         with:
           cache: true
 
-      # 6️⃣ Manually login to Shorebird (fixes CI auth issue)
-      - name: 🔐 Shorebird Login
-        run: echo "${{ secrets.SHOREBIRD_AUTH_TOKEN }}" | shorebird login --token
+      # 6️⃣ Restore Shorebird Auth (use Base64-encoded secret)
+      - name: 🔐 Setup Shorebird Auth
+        run: |
+          mkdir -p ~/.config/shorebird
+          echo "$SHOREBIRD_AUTH" | base64 --decode > ~/.config/shorebird/access_tokens.json
 
       # 7️⃣ Verify Shorebird authentication
       - name: ✅ Verify Shorebird Auth
         run: |
-          shorebird doctor
+          shorebird doctor || exit 1
           echo "✅ Shorebird authentication successful"
 
       # 8️⃣ Check version change
@@ -58,33 +60,27 @@ jobs:
           CURRENT_VERSION=$(grep '^version:' $VERSION_FILE | awk '{print $2}')
           echo "CURRENT_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
           echo "Current version: $CURRENT_VERSION"
-          
-          # Fetch main branch to compare versions
-          if git rev-parse --verify origin/main >/dev/null 2>&1; then
-            git fetch origin main --depth=1
-          else
-            echo "No main branch found, skipping comparison."
-            echo "VERSION_CHANGED=true" >> $GITHUB_ENV
-          fi
-          
-          if git show origin/main:pubspec.yaml 2>/dev/null | grep -q '^version:'; then
-            OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}')
-            echo "OLD_VERSION=$OLD_VERSION" >> $GITHUB_ENV
-            echo "Old version: $OLD_VERSION"
-            
-            if [ "$CURRENT_VERSION" != "$OLD_VERSION" ]; then
-              echo "VERSION_CHANGED=true" >> $GITHUB_ENV
-              echo "✅ Version changed from $OLD_VERSION to $CURRENT_VERSION"
-            else
-              echo "VERSION_CHANGED=false" >> $GITHUB_ENV
-              echo "🔄 No version change detected"
+
+          # Fetch main branch for comparison
+          if git fetch origin main --depth=1 2>/dev/null; then
+            if git show origin/main:pubspec.yaml 2>/dev/null | grep -q '^version:'; then
+              OLD_VERSION=$(git show origin/main:pubspec.yaml | grep '^version:' | awk '{print $2}')
+              echo "OLD_VERSION=$OLD_VERSION" >> $GITHUB_ENV
+              echo "Old version: $OLD_VERSION"
+              if [ "$CURRENT_VERSION" != "$OLD_VERSION" ]; then
+                echo "VERSION_CHANGED=true" >> $GITHUB_ENV
+                echo "✅ Version changed from $OLD_VERSION to $CURRENT_VERSION"
+              else
+                echo "VERSION_CHANGED=false" >> $GITHUB_ENV
+                echo "🔄 No version change detected"
+              fi
             fi
           else
+            echo "📝 First build or no main branch found"
             echo "VERSION_CHANGED=true" >> $GITHUB_ENV
-            echo "📝 First build or unable to compare versions, building release"
           fi
 
-      # 9️⃣ Build or patch using Shorebird
+      # 9️⃣ Build or Patch using Shorebird
       - name: Build or Patch
         run: |
           if [ "$VERSION_CHANGED" = "true" ]; then
@@ -96,14 +92,14 @@ jobs:
           fi
 
       # 🔟 Send to Telegram (only on new release)
-      - name: Send APK to Telegram
+      - name: 📤 Send APK to Telegram
         if: env.VERSION_CHANGED == 'true'
         run: |
           APK_PATH=$(find build -name "app-release.apk" -type f | head -n 1)
           if [ -z "$APK_PATH" ]; then
             APK_PATH=$(find . -name "*.apk" -type f | grep release | head -n 1)
           fi
-          
+
           if [ -n "$APK_PATH" ] && [ -f "$APK_PATH" ]; then
             echo "📦 Sending $APK_PATH to Telegram..."
             curl -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
@@ -113,6 +109,5 @@ jobs:
                  https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
           else
             echo "❌ APK file not found"
-            echo "Searching for APK files..."
             find . -name "*.apk" -type f
           fi
