@@ -93,17 +93,15 @@ jobs:
 
           if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🆕 Building new release (.apk)..."
-              shorebird release android \
-              --no-confirm --verbose \
+              yes | shorebird release android \
               --artifact=apk \
               --flutter-version="$FLUTTER_VERSION" \
               -- --no-tree-shake-icons \
           else
             echo "🧩 Creating patch for release version $RELEASE_VERSION..."
-              shorebird patch \
+              yes | shorebird patch \
               --platforms=android \
               --release-version="$RELEASE_VERSION" \
-              --no-confirm --verbose \
               --allow-native-diffs \
               --allow-asset-diffs
               
