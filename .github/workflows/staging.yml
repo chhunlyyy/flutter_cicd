@@ -120,7 +120,7 @@ jobs:
               echo "✅ Found APK: $APK_PATH"
               curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                   -F document=@"$APK_PATH" \
-                  -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
+                  -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')" \
                   -F parse_mode=Markdown \
                   https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
             else
@@ -130,6 +130,6 @@ jobs:
             echo "📩 Sending new patch notification to Telegram..."
             curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
               -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
-              -d text="🧩 *New Patch Created*%0A📦 Version: v$CURRENT_VERSION%0A📅 $(date '+%Y-%m-%d %H:%M')%0ABranch: staging%0ACommit: $GITHUB_SHA" \
+              -d text="🧩 *New Patch Created*%0A📦 Version: v$CURRENT_VERSION%0A📅 $(date '+%Y-%m-%d %H:%M')" \
               -d parse_mode="Markdown"
           fi
