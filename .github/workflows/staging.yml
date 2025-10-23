@@ -6,7 +6,7 @@ on:
       - staging
 
 env:
-  SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
+  SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
 
 jobs:
   build:
