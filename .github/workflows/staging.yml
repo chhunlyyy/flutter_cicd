@@ -94,18 +94,19 @@ jobs:
           if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🆕 Building new release (.apk)..."
               shorebird release android \
+              --no-confirm --verbose \
               --artifact=apk \
               --flutter-version="$FLUTTER_VERSION" \
               -- --no-tree-shake-icons \
-              --no-confirm --verbose
           else
             echo "🧩 Creating patch for release version $RELEASE_VERSION..."
               shorebird patch \
               --platforms=android \
               --release-version="$RELEASE_VERSION" \
+              --no-confirm --verbose \
               --allow-native-diffs \
-              --allow-asset-diffs \
-              --no-confirm --verbose
+              --allow-asset-diffs
+              
           fi
 
       # 9️⃣ Send APK to Telegram (only for new releases)
