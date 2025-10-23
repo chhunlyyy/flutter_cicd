@@ -70,14 +70,14 @@ jobs:
       # 7️⃣ Build or patch using Shorebird
       - name: Build or Patch
         run: |
-          if [ "$VERSION_CHANGED" = "true" ]; then
+         if [ "$VERSION_CHANGED" = "true" ]; then
             echo "🚀 Building new release (version: $CURRENT_VERSION)"
             # Build Android release
-            shorebird release android --force --verbose
+            shorebird release android --no-confirm --verbose
           else
             echo "🧩 Creating patch (no version change)"
             # Create Android patch
-            shorebird patch android --verbose
+            shorebird patch android --no-confirm --verbose
           fi
 
       # 8️⃣ Send to Telegram
