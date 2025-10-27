@@ -1,4 +1,4 @@
-name: 🐦 Flutter CI/CD with Shorebird
+name: 🐦 Flutter CI/CD with Shorebird (iOS + Android)
 
 on:
   push:
@@ -30,7 +30,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     defaults:
       run:
         shell: bash
@@ -49,7 +49,7 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
 
-      # 3️⃣ Cache dependencies
+      # 3️⃣ Cache Flutter dependencies
       - name: 💾 Cache Flutter dependencies
         uses: actions/cache@v4
         with:
@@ -68,14 +68,20 @@ jobs:
         with:
           cache: true
 
-      # 6️⃣ Setup Java (required for Android builds)
+      # 6️⃣ Setup Java (for Android)
       - name: ☕ Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      # 7️⃣ Check version change
+      # 7️⃣ Setup Xcode (for iOS)
+      - name: 🧰 Setup Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+
+      # 8️⃣ Check version change
       - name: 🔍 Check version change
         id: version_check
         run: |
@@ -101,52 +107,65 @@ jobs:
             echo "📝 First commit or unable to compare versions."
           fi
 
-      # 8️⃣ Run Shorebird Release or Patch
-      - name: 🚀 Create Shorebird Release or Patch
+      # 9️⃣ Run Shorebird Release or Patch (both iOS + Android)
+      - name: 🚀 Create Shorebird Release or Patch (iOS + Android)
         run: |
           echo "📌 Flutter version: $FLUTTER_VERSION"
           echo "📦 App version: $CURRENT_VERSION"
 
           if [ "$VERSION_CHANGED" = "true" ]; then
-            echo "🆕 Building new release (.apk)..."
+            echo "🆕 Building new release for Android and iOS..."
             shorebird release android \
               --no-confirm --verbose \
               --artifact=apk \
               --flutter-version="$FLUTTER_VERSION"
+
+            shorebird release ios \
+              --no-confirm --verbose \
+              --flutter-version="$FLUTTER_VERSION"
           else
-            echo "🧩 Creating patch for version $CURRENT_VERSION..."
+            echo "🧩 Creating patch for both platforms..."
             shorebird patch \
-              --platforms=android \
+              --platforms=android,ios \
               --release-version="$CURRENT_VERSION" \
               --no-confirm --verbose \
               --allow-native-diffs \
               --allow-asset-diffs
           fi
 
-      # 9️⃣ Send to Telegram
+      # 🔟 Notify Telegram
       - name: 📤 Notify Telegram
         run: |
           if [ "$VERSION_CHANGED" = "true" ]; then
-            echo "📤 Sending new release APK to Telegram..."
+            echo "📤 Sending new release notification to Telegram..."
             APK_PATH=$(find build/app/outputs/flutter-apk -type f -name "*release*.apk" | head -n 1)
+            IPA_PATH=$(find build/ios/ipa -type f -name "*.ipa" | head -n 1)
 
-            if [ -z "$APK_PATH" ]; then
-              echo "⚠️ APK not found. Searching in full repo..."
-              APK_PATH=$(find . -type f -name "*release*.apk" | head -n 1)
-            fi
+            MESSAGE="🚀 *New Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')"
 
             if [ -n "$APK_PATH" ]; then
               echo "✅ Found APK: $APK_PATH"
               curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
                   -F document=@"$APK_PATH" \
-                  -F caption="🚀 *New App Release v$CURRENT_VERSION*%0A📅 $(date '+%Y-%m-%d %H:%M')" \
+                  -F caption="$MESSAGE (Android)" \
                   -F parse_mode=Markdown \
                   https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
-            else
-              echo "❌ No APK found!"
+            fi
+
+            if [ -n "$IPA_PATH" ]; then
+              echo "✅ Found IPA: $IPA_PATH"
+              curl -s -F chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+                  -F document=@"$IPA_PATH" \
+                  -F caption="$MESSAGE (iOS)" \
+                  -F parse_mode=Markdown \
+                  https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendDocument
+            fi
+
+            if [ -z "$APK_PATH" ] && [ -z "$IPA_PATH" ]; then
+              echo "❌ No build files found!"
             fi
           else
-            echo "📩 Sending new patch notification to Telegram..."
+            echo "📩 Sending patch notification to Telegram..."
             curl -s -X POST "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
               -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
               -d text="🧩 *New Patch Created*%0A📦 Version: v$CURRENT_VERSION%0A📅 $(date '+%Y-%m-%d %H:%M')" \
