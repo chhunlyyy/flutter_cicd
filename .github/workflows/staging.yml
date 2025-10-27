@@ -4,6 +4,25 @@ on:
   push:
     branches:
       - staging
+  workflow_dispatch:
+  inputs:
+    build_mode:
+      description: "Build type"
+      required: true
+      default: "release"
+      type: choice
+      options:
+        - debug
+        - profile
+        - release
+    environment:
+      description: "Environment"
+      required: true
+      default: "development"
+      type: choice
+      options:
+        - development
+        - production
 
 env:
   SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_AUTH_TOKEN }}
